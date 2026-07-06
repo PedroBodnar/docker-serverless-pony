@@ -18,6 +18,13 @@ FROM runpod/worker-comfyui:5.8.6-base
 # surfaces install errors (comfy-cli hides them).
 RUN comfy-node-install comfyui-impact-pack comfyui-impact-subpack
 
+# Guard: `comfy-node-install` can exit 0 without actually installing the nodes —
+# an earlier build shipped WITHOUT Impact Pack and only failed at job time with
+# "Node 'FaceDetailer' not found". Assert the required node sources are present
+# so a broken install fails THIS build instead of every future render job.
+COPY verify_nodes.py /tmp/verify_nodes.py
+RUN python /tmp/verify_nodes.py
+
 # Point ComfyUI at the checkpoint + detector models on the attached network
 # volume (mounted at /runpod-volume on serverless). ComfyUI auto-loads this file
 # from its base dir. Nothing is downloaded or baked into the image.
