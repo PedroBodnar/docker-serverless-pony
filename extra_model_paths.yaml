@@ -1,0 +1,17 @@
+# Models are served from the PONY/ZIMAGE network volume, mounted at
+# /runpod-volume on RunPod serverless. The volume carries a full runpod-slim
+# ComfyUI install; we only borrow its models/ tree (never re-baked into the
+# image). Keys match the folder names ComfyUI + impact-subpack register.
+#
+# The t2i-v05-hires workflow needs exactly:
+#   checkpoints/ponyRealism_V23ULTRA.safetensors  (CheckpointLoaderSimple)
+#   ultralytics/bbox/face_yolov8m.pt              (FaceDetailer face pass)
+#   ultralytics/bbox/hand_yolov8s.pt              (FaceDetailer hand pass)
+# sams/ and upscale_models/ are mapped for parity but unused by this graph.
+pony_volume:
+  base_path: /runpod-volume/runpod-slim/ComfyUI/models/
+  checkpoints: checkpoints
+  ultralytics_bbox: ultralytics/bbox
+  ultralytics_segm: ultralytics/segm
+  sams: sams
+  upscale_models: upscale_models
