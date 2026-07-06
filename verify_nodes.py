@@ -9,10 +9,16 @@ job time as `Node 'FaceDetailer' not found`. This script turns that into a build
 failure instead: it scans the installed custom-node sources for the class names
 the `t2i-v05-hires` workflow needs and exits non-zero if any are missing.
 
-Cheap on purpose: it greps the .py sources for the class definitions rather than
-importing ComfyUI (which would need torch + a GPU). Presence of the source is
-what `comfy-node-install` must guarantee; ComfyUI loads it at runtime.
+Two checks, both cheap (no ComfyUI/GPU needed):
+  1. Source presence — grep the .py sources for the class definitions, proving
+     `comfy-node-install` actually copied the node code.
+  2. Runtime deps import — `import cv2`, `ultralytics`, etc. Source presence is
+     NOT enough: `comfy-node-install` once copied the source but skipped the
+     Python deps, so both packs failed to import at runtime with
+     "No module named 'cv2'" and FaceDetailer reported "not found". Importing the
+     critical deps here turns that into a build failure instead.
 """
+import importlib
 import os
 import sys
 
@@ -22,6 +28,16 @@ CUSTOM_NODES = "/comfyui/custom_nodes"
 REQUIRED = {
     "FaceDetailer": "ComfyUI-Impact-Pack",
     "UltralyticsDetectorProvider": "ComfyUI-Impact-Subpack",
+}
+
+# Runtime deps whose absence makes the packs fail to import (module -> pip name).
+# These are the module-level imports at the top of the pack __init__ that broke
+# before; if any is missing the build must fail, not the render job.
+REQUIRED_IMPORTS = {
+    "cv2": "opencv-python-headless",
+    "ultralytics": "ultralytics",
+    "skimage": "scikit-image",
+    "segment_anything": "segment-anything",
 }
 
 
@@ -56,7 +72,7 @@ def main() -> int:
             missing.append((cls, pack))
 
     if missing:
-        print("\nFATAL: required custom nodes not installed:", file=sys.stderr)
+        print("\nFATAL: required custom node SOURCE not installed:", file=sys.stderr)
         for cls, pack in missing:
             print(f"  - {cls} (from {pack})", file=sys.stderr)
         print(
@@ -73,7 +89,30 @@ def main() -> int:
             pass
         return 1
 
-    print("\nAll required custom nodes present.")
+    # Source present is not enough — the packs also need their Python deps to
+    # import, or ComfyUI silently drops the nodes at startup ("not found").
+    missing_deps = []
+    for mod, pip_name in REQUIRED_IMPORTS.items():
+        try:
+            importlib.import_module(mod)
+            print(f"  [OK] import {mod} ({pip_name})")
+        except Exception as exc:  # ImportError, and anything a dep raises on import
+            print(f"  [MISSING] import {mod} ({pip_name}) -> {type(exc).__name__}: {exc}")
+            missing_deps.append((mod, pip_name))
+
+    if missing_deps:
+        print("\nFATAL: required runtime dependencies do not import:", file=sys.stderr)
+        for mod, pip_name in missing_deps:
+            print(f"  - {mod}  (pip install {pip_name})", file=sys.stderr)
+        print(
+            "\nThe node source is present but these deps are missing, so both "
+            "Impact packs fail to import at runtime and FaceDetailer reports "
+            "\"not found\". Install the packs' requirements in the image.",
+            file=sys.stderr,
+        )
+        return 1
+
+    print("\nAll required custom nodes present and their runtime deps import.")
     return 0
 
 

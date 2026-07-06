@@ -18,10 +18,24 @@ FROM runpod/worker-comfyui:5.8.6-base
 # surfaces install errors (comfy-cli hides them).
 RUN comfy-node-install comfyui-impact-pack comfyui-impact-subpack
 
-# Guard: `comfy-node-install` can exit 0 without actually installing the nodes —
-# an earlier build shipped WITHOUT Impact Pack and only failed at job time with
-# "Node 'FaceDetailer' not found". Assert the required node sources are present
-# so a broken install fails THIS build instead of every future render job.
+# comfy-node-install copies the node SOURCE but can silently skip the Python
+# deps: it aborts on Impact Pack's `git+.../sam2` requirement yet still exits 0,
+# so cv2 / ultralytics / etc. never install and BOTH packs fail to import at
+# runtime with "No module named 'cv2'" (FaceDetailer then reports "not found").
+# Install each pack's own requirements explicitly, dropping only the heavy,
+# build-fragile sam2 git dependency — the t2i-v05-hires graph uses the YOLO bbox
+# FaceDetailer path, not SAM. Reading the packs' requirements.txt keeps this in
+# sync with whatever comfy-node-install pinned.
+RUN grep -vhE '^[[:space:]]*git\+' \
+      /comfyui/custom_nodes/comfyui-impact-pack/requirements.txt \
+      /comfyui/custom_nodes/comfyui-impact-subpack/requirements.txt \
+    | pip install --no-cache-dir -r /dev/stdin
+
+# Guard: `comfy-node-install` can exit 0 without a working install — an earlier
+# build shipped the node SOURCE but not its deps, so the packs failed to import
+# at runtime ("No module named 'cv2'") and "Node 'FaceDetailer' not found" hit
+# every job. verify_nodes.py asserts BOTH the node sources are present AND their
+# runtime deps import, so a broken install fails THIS build, not every render.
 COPY verify_nodes.py /tmp/verify_nodes.py
 RUN python /tmp/verify_nodes.py
 
